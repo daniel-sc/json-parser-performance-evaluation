@@ -1,0 +1,6 @@
+{
+  "require": {
+    "cerbero/json-parser": "1.1.0",
+    "guzzlehttp/guzzle": "7.8.1"
+  }
+}
