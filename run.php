@@ -1,7 +1,10 @@
 <?php
 
 use Cerbero\JsonParser\JsonParser;
+use GuzzleHttp\Psr7\StreamWrapper;
 use GuzzleHttp\Psr7\Utils;
+use JsonMachine\Items;
+use JsonMachine\JsonDecoder\ExtJsonDecoder;
 
 require_once __DIR__ . '/vendor/autoload.php';
 
@@ -700,7 +703,7 @@ function measure(callable $fn)
 
 }
 
-echo "json_decode\n";
+echo "\njson_decode:\n";
 measure(function () use ($example) {
     $json = json_decode($example, true);
     $result = array_map(fn($x) => ['username' => $x['username'], 'password' => $x['password']], $json);
@@ -708,8 +711,18 @@ measure(function () use ($example) {
 });
 
 
-echo "JsonParser\n";
+echo "\nJsonParser:\n";
 measure(function () use ($example) {
     $result = JsonParser::parse(Utils::streamFor($example))->pointers(['/-/username', '/-/password'])->toArray();
-    #echo 'result: ' . json_encode($result) . "\n";
+    //echo 'result: ' . json_encode($result) . "\n";
+});
+
+echo "\njson-machine:\n";
+measure(function () use ($example) {
+    $json = Items::fromStream(StreamWrapper::getResource(Utils::streamFor($example)), ['decoder' => new ExtJsonDecoder(true)]);
+    $result = [];
+    foreach ($json as $item) {
+        $result[] = ['username' => $item['username'], 'password' => $item['password']];
+    }
+    //echo 'result: ' . json_encode($result) . "\n";
 });
