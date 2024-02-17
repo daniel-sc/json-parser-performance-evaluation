@@ -5,6 +5,8 @@ use GuzzleHttp\Psr7\StreamWrapper;
 use GuzzleHttp\Psr7\Utils;
 use JsonMachine\Items;
 use JsonMachine\JsonDecoder\ExtJsonDecoder;
+use JsonStreamingParser\Listener\IdleListener;
+use JsonStreamingParser\Parser;
 
 require_once __DIR__ . '/vendor/autoload.php';
 
@@ -687,20 +689,20 @@ echo "input size: " . strlen($example) . "\n";
 
 function measure(callable $fn)
 {
+    gc_collect_cycles();
+    $startMem = memory_get_usage();
     $start = getrusage();
     $startSec = microtime(true);
-    $fn();
-    $fn();
-    $fn();
+    for ($i = 0; $i < 1000; $i++) {
+        $fn();
+    }
     $endSec = microtime(true);
     $end = getrusage();
+    $endMem = memory_get_usage();
+    echo "memory peak: " . ($endMem - $startMem)/1024 . " kB\n";
     echo "clock time sec: " . ($endSec - $startSec) . "\n";
     $duration = ($end["ru_utime.tv_sec"] * 1e6 + $end["ru_utime.tv_usec"]) - ($start["ru_utime.tv_sec"] * 1e6 + $start["ru_utime.tv_usec"]);
     echo "CPU time ms: " . ($duration / 1000) . " ms\n";
-}
-
-{
-
 }
 
 echo "\njson_decode:\n";
@@ -725,4 +727,44 @@ measure(function () use ($example) {
         $result[] = ['username' => $item['username'], 'password' => $item['password']];
     }
     //echo 'result: ' . json_encode($result) . "\n";
+});
+
+echo "\njsonstreamingparser:\n";
+measure(function () use ($example) {
+    $listener = new class extends IdleListener {
+        public $result = [];
+        private $objectLevel = 0;
+        private $currentKey = null;
+
+        public function startObject():void {
+            $this->objectLevel++;
+        }
+
+        public function startArray(): void
+        {
+            $this->objectLevel++;
+        }
+
+        public function endArray(): void
+        {
+             $this->objectLevel--;
+        }
+
+        public function endObject():void {
+            $this->objectLevel--;
+        }
+        public function key($key):void {
+            $this->currentKey = $key;
+        }
+        public function value($value):void {
+            if ($this->objectLevel === 2 && $this->currentKey === 'password') {
+                $this->result[] = ['password' => $value];
+            } elseif ($this->objectLevel === 2 && $this->currentKey === 'username') {
+                $this->result[] = ['username' => $value];
+            }
+        }
+    };
+    $parser = new Parser(StreamWrapper::getResource(Utils::streamFor($example)), $listener);
+    $parser->parse();
+    //echo 'result: ' . json_encode($listener->result) . "\n";
 });
