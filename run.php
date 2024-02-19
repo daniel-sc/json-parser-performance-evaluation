@@ -685,43 +685,55 @@ $example = '[
     }
   ]';
 
-echo "input size: " . strlen($example) . "\n";
+$iterations = intval($argv[1] ?? 1000);
+$repeatInput = intval($argv[2] ?? 1);
+
+$repeatedInput = $example;
+$coreExample = substr($example, 1, strlen($example) - 2);
+for ($i = 1; $i < $repeatInput; $i++) {
+    $repeatedInput = substr($repeatedInput, 0, strlen($repeatedInput) - 1) . ',' . $coreExample . ']';
+}
+$inputSize = strlen($repeatedInput);
+echo "input size: " . $inputSize . "\n";
+
 
 function measure(callable $fn)
 {
+    global $inputSize, $iterations;
     gc_collect_cycles();
     $startMem = memory_get_usage();
     $start = getrusage();
     $startSec = microtime(true);
-    for ($i = 0; $i < 1000; $i++) {
+    for ($i = 0; $i < $iterations; $i++) {
         $fn();
     }
     $endSec = microtime(true);
     $end = getrusage();
     $endMem = memory_get_usage();
-    echo "memory peak: " . ($endMem - $startMem)/1024 . " kB\n";
+    echo "memory peak: " . ($endMem - $startMem) / 1024 . " kB\n";
     echo "clock time sec: " . ($endSec - $startSec) . "\n";
     $duration = ($end["ru_utime.tv_sec"] * 1e6 + $end["ru_utime.tv_usec"]) - ($start["ru_utime.tv_sec"] * 1e6 + $start["ru_utime.tv_usec"]);
     echo "CPU time ms: " . ($duration / 1000) . " ms\n";
+    echo "ns/byte: " . ($duration / $iterations / $inputSize) . "\n";
 }
 
 echo "\njson_decode:\n";
-measure(function () use ($example) {
-    $json = json_decode($example, true);
+measure(function () use ($repeatedInput) {
+    $json = json_decode($repeatedInput, true);
     $result = array_map(fn($x) => ['username' => $x['username'], 'password' => $x['password']], $json);
-    #echo 'result: ' . json_encode($result) . "\n";
+    //echo 'result: ' . json_encode($result) . "\n";
 });
 
 
 echo "\nJsonParser:\n";
-measure(function () use ($example) {
-    $result = JsonParser::parse(Utils::streamFor($example))->pointers(['/-/username', '/-/password'])->toArray();
+measure(function () use ($repeatedInput) {
+    $result = JsonParser::parse(Utils::streamFor($repeatedInput))->pointers(['/-/username', '/-/password'])->toArray();
     //echo 'result: ' . json_encode($result) . "\n";
 });
 
 echo "\njson-machine:\n";
-measure(function () use ($example) {
-    $json = Items::fromStream(StreamWrapper::getResource(Utils::streamFor($example)), ['decoder' => new ExtJsonDecoder(true)]);
+measure(function () use ($repeatedInput) {
+    $json = Items::fromStream(StreamWrapper::getResource(Utils::streamFor($repeatedInput)), ['decoder' => new ExtJsonDecoder(true)]);
     $result = [];
     foreach ($json as $item) {
         $result[] = ['username' => $item['username'], 'password' => $item['password']];
@@ -730,13 +742,14 @@ measure(function () use ($example) {
 });
 
 echo "\njsonstreamingparser:\n";
-measure(function () use ($example) {
+measure(function () use ($repeatedInput) {
     $listener = new class extends IdleListener {
         public $result = [];
         private $objectLevel = 0;
         private $currentKey = null;
 
-        public function startObject():void {
+        public function startObject(): void
+        {
             $this->objectLevel++;
         }
 
@@ -747,16 +760,21 @@ measure(function () use ($example) {
 
         public function endArray(): void
         {
-             $this->objectLevel--;
-        }
-
-        public function endObject():void {
             $this->objectLevel--;
         }
-        public function key($key):void {
+
+        public function endObject(): void
+        {
+            $this->objectLevel--;
+        }
+
+        public function key($key): void
+        {
             $this->currentKey = $key;
         }
-        public function value($value):void {
+
+        public function value($value): void
+        {
             if ($this->objectLevel === 2 && $this->currentKey === 'password') {
                 $this->result[] = ['password' => $value];
             } elseif ($this->objectLevel === 2 && $this->currentKey === 'username') {
@@ -764,7 +782,7 @@ measure(function () use ($example) {
             }
         }
     };
-    $parser = new Parser(StreamWrapper::getResource(Utils::streamFor($example)), $listener);
+    $parser = new Parser(StreamWrapper::getResource(Utils::streamFor($repeatedInput)), $listener);
     $parser->parse();
     //echo 'result: ' . json_encode($listener->result) . "\n";
 });
